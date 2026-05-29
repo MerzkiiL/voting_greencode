@@ -178,9 +178,13 @@
     document.getElementById('vote-btn').style.display = 'none';
     document.getElementById('retract-btn').style.display = 'block';
     
-    const total = votes[0] + votes[1];
-    const p0 = total ? Math.round(votes[0] / total * 100) : 0;
-    const p1 = total ? Math.round(votes[1] / total * 100) : 0;
+    // ИСПРАВЛЕНО: Теперь правильно берем элементы из массива votes
+    const v0 = votes[0] || 0;
+    const v1 = votes[1] || 0;
+    const total = v0 + v1;
+    
+    const p0 = total ? Math.round(v0 / total * 100) : 0;
+    const p1 = total ? Math.round(v1 / total * 100) : 0;
     
     document.getElementById('results').style.display = 'block';
     setTimeout(() => {
