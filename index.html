@@ -93,19 +93,20 @@
 </div>
 
 <script type="module">
-  // 1. Импортируем Firebase модули прямо из интернета
-  import { initializeApp } from "https://gstatic.com";
-  import { getDatabase, ref, runTransaction, onValue } from "https://gstatic.com";
+  // 1. Импортируем правильные веб-версии модулей Firebase v10
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+  import { getDatabase, ref, runTransaction, onValue } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
-  // 2. Твой конфиг ключей из консоли Firebase
+  // 2. Твои точные данные из консоли Firebase (со скриншота)
   const firebaseConfig = {
     apiKey: "AIzaSyDBiWUwwSitNULMk3_zcAvtDPlhmh_Wa0k",
-    authDomain: "://firebaseapp.com",
-    databaseURL: "https://firebaseio.com",
+    authDomain: "greencode-voting.firebaseapp.com",
+    databaseURL: "https://greencode-voting-default-rtdb.firebaseio.com",
     projectId: "greencode-voting",
-    storageBucket: "://appspot.com",
+    storageBucket: "greencode-voting.firebasestorage.app",
     messagingSenderId: "647850564488",
-    appId: "1:647850564488:web:d98d8eca476d075d58f83d"
+    appId: "1:647850564488:web:d98d8eca476d075d58f83d",
+    measurementId: "G-KZFZ8ZE7NW"
   };
 
   // Инициализируем подключение к базе данных
@@ -136,15 +137,14 @@
   window.submitVote = function() {
     if (selected === -1 || getMyVote() !== null) return;
     
-    // Ссылка на конкретную опцию в облаке (option0 или option1)
     const optionRef = ref(database, 'votes_2026/option' + selected);
     
-    // Транзакция безопасно увеличивает счетчик в облаке на +1
     runTransaction(optionRef, (currentValue) => {
       return (currentValue || 0) + 1;
     }).then(() => {
       saveMyVote(selected);
-      // Экран результатов обновится автоматически через функцию onValue ниже
+    }).catch((error) => {
+      console.error("Ошибка при отправке голоса: ", error);
     });
   }
 
@@ -152,17 +152,14 @@
     const myVote = getMyVote();
     if (myVote === null) return;
     
-    // Ссылка на опцию, за которую голосовали ранее
     const optionRef = ref(database, 'votes_2026/option' + myVote);
     
-    // Безопасно уменьшаем счетчик в облаке на -1
     runTransaction(optionRef, (currentValue) => {
       return Math.max(0, (currentValue || 1) - 1);
     }).then(() => {
       localStorage.removeItem(STORAGE_KEY);
       selected = -1;
       
-      // Возвращаем интерфейс к состоянию выбора
       document.getElementById('results').style.display = 'none';
       document.getElementById('retract-btn').style.display = 'none';
       document.getElementById('vote-btn').style.display = 'block';
@@ -170,6 +167,8 @@
       document.getElementById('cards').querySelectorAll('.card').forEach(c => {
         c.classList.remove('disabled', 'selected');
       });
+    }).catch((error) => {
+      console.error("Ошибка при отмене голоса: ", error);
     });
   }
 
@@ -178,7 +177,6 @@
     document.getElementById('vote-btn').style.display = 'none';
     document.getElementById('retract-btn').style.display = 'block';
     
-    // ИСПРАВЛЕНО: Теперь правильно берем элементы из массива votes
     const v0 = votes[0] || 0;
     const v1 = votes[1] || 0;
     const total = v0 + v1;
@@ -196,7 +194,7 @@
     }, 100);
   }
 
-  // ГЛАВНЫЙ СЛУШАТЕЛЬ ОБЛАКА: Синхронизирует данные на всех устройствах онлайн
+  // Слушатель изменений в базе данных
   onValue(votesRef, (snapshot) => {
     const data = snapshot.val() || { option0: 0, option1: 0 };
     const votes = [data.option0 || 0, data.option1 || 0];
@@ -204,14 +202,10 @@
     const myVote = getMyVote();
     if (myVote !== null) {
       selected = parseInt(myVote);
-      // Визуально подсвечиваем ту карточку, которую выбрал юзер изначально
       document.getElementById('card-0').classList.toggle('selected', selected === 0);
       document.getElementById('card-1').classList.toggle('selected', selected === 1);
       showResults(votes);
     } else {
-      // Если кто-то другой проголосовал, а текущий юзер еще нет — 
-      // мы не показываем ему результаты (чтобы не влиять на выбор), 
-      // но если он уже на экране результатов, обновляем цифры онлайн.
       if (document.getElementById('results').style.display === 'block') {
         showResults(votes);
       }
