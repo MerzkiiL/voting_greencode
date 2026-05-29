@@ -93,11 +93,9 @@
 </div>
 
 <script type="module">
-  // 1. Импортируем правильные веб-версии модулей Firebase v10
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
   import { getDatabase, ref, runTransaction, onValue } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
-  // 2. Твои точные данные из консоли Firebase (со скриншота)
   const firebaseConfig = {
     apiKey: "AIzaSyDBiWUwwSitNULMk3_zcAvtDPlhmh_Wa0k",
     authDomain: "greencode-voting.firebaseapp.com",
@@ -109,13 +107,13 @@
     measurementId: "G-KZFZ8ZE7NW"
   };
 
-  // Инициализируем подключение к базе данных
   const app = initializeApp(firebaseConfig);
   const database = getDatabase(app);
   const votesRef = ref(database, 'votes_2026/');
 
   const STORAGE_KEY = 'greencode_vote_2026';
   let selected = -1;
+  let currentVotes = [0, 0]; // Храним актуальные голоса в оперативной памяти
 
   function getMyVote() {
     try { return localStorage.getItem(STORAGE_KEY); } catch(e) { return null; }
@@ -125,7 +123,63 @@
     try { localStorage.setItem(STORAGE_KEY, String(idx)); } catch(e) {}
   }
 
-  // Делаем функции доступными для HTML-атрибутов onclick
+  // Единая функция, которая плавно и без лагов собирает интерфейс
+  function renderUI() {
+    const myVote = getMyVote();
+    const card0 = document.getElementById('card-0');
+    const card1 = document.getElementById('card-1');
+    const voteBtn = document.getElementById('vote-btn');
+    const retractBtn = document.getElementById('retract-btn');
+    const resultsDiv = document.getElementById('results');
+
+    if (myVote !== null) {
+      // --- РЕЖИМ: ПОЛЬЗОВАТЕЛЬ УЖЕ ПРОГОЛОСОВАЛ ---
+      const votedIdx = parseInt(myVote);
+      selected = votedIdx;
+
+      // Подсвечиваем и блокируем карточки
+      card0.classList.toggle('selected', votedIdx === 0);
+      card1.classList.toggle('selected', votedIdx === 1);
+      card0.classList.add('disabled');
+      card1.classList.add('disabled');
+
+      // Переключаем кнопки
+      voteBtn.style.display = 'none';
+      voteBtn.textContent = "Cast my vote"; 
+      retractBtn.style.display = 'block';
+
+      // Считаем проценты
+      const v0 = currentVotes[0];
+      const v1 = currentVotes[1];
+      const total = v0 + v1;
+      const p0 = total ? Math.round(v0 / total * 100) : 0;
+      const p1 = total ? Math.round(v1 / total * 100) : 0;
+
+      // Отрисовываем результаты
+      resultsDiv.style.display = 'block';
+      document.getElementById('bar-0').style.width = p0 + '%';
+      document.getElementById('bar-1').style.width = p1 + '%';
+      document.getElementById('pct-0').textContent = p0 + '%';
+      document.getElementById('pct-1').textContent = p1 + '%';
+      document.getElementById('total-votes').textContent = `${total} vote${total !== 1 ? 's' : ''} total`;
+
+    } else {
+      // --- РЕЖИМ: ОЖИДАНИЕ ВЫБОРА ---
+      card0.classList.remove('disabled');
+      card1.classList.remove('disabled');
+      
+      if (selected === -1) {
+        card0.classList.remove('selected');
+        card1.classList.remove('selected');
+        voteBtn.classList.remove('active');
+      }
+
+      voteBtn.style.display = 'block';
+      retractBtn.style.display = 'none';
+      resultsDiv.style.display = 'none';
+    }
+  }
+
   window.selectCard = function(idx) {
     if (getMyVote() !== null) return;
     selected = idx;
@@ -137,14 +191,28 @@
   window.submitVote = function() {
     if (selected === -1 || getMyVote() !== null) return;
     
+    // Защита от спама: мгновенно визуально отключаем кнопку на время отправки
+    const voteBtn = document.getElementById('vote-btn');
+    voteBtn.classList.remove('active');
+    voteBtn.textContent = "Sending...";
+
     const optionRef = ref(database, 'votes_2026/option' + selected);
     
+    // Оптимистично прибавляем голос локально, чтобы не было задержки
+    currentVotes[selected]++;
+    saveMyVote(selected);
+    renderUI(); // Мгновенный переход к результатам!
+
+    // Параллельно отправляем в облако
     runTransaction(optionRef, (currentValue) => {
       return (currentValue || 0) + 1;
-    }).then(() => {
-      saveMyVote(selected);
     }).catch((error) => {
-      console.error("Ошибка при отправке голоса: ", error);
+      // Если произошла ошибка, откатываем интерфейс назад
+      console.error("Ошибка транзакции: ", error);
+      localStorage.removeItem(STORAGE_KEY);
+      currentVotes[selected] = Math.max(0, currentVotes[selected] - 1);
+      selected = -1;
+      renderUI();
     });
   }
 
@@ -152,64 +220,28 @@
     const myVote = getMyVote();
     if (myVote === null) return;
     
-    const optionRef = ref(database, 'votes_2026/option' + myVote);
+    const votedIdx = parseInt(myVote);
+    const optionRef = ref(database, 'votes_2026/option' + votedIdx);
     
+    // Оптимистичный откат локально
+    currentVotes[votedIdx] = Math.max(0, currentVotes[votedIdx] - 1);
+    localStorage.removeItem(STORAGE_KEY);
+    selected = -1;
+    renderUI(); // Мгновенно возвращаем пользователя к экрану выбора
+
+    // Удаляем из облака
     runTransaction(optionRef, (currentValue) => {
       return Math.max(0, (currentValue || 1) - 1);
-    }).then(() => {
-      localStorage.removeItem(STORAGE_KEY);
-      selected = -1;
-      
-      document.getElementById('results').style.display = 'none';
-      document.getElementById('retract-btn').style.display = 'none';
-      document.getElementById('vote-btn').style.display = 'block';
-      document.getElementById('vote-btn').classList.remove('active');
-      document.getElementById('cards').querySelectorAll('.card').forEach(c => {
-        c.classList.remove('disabled', 'selected');
-      });
     }).catch((error) => {
-      console.error("Ошибка при отмене голоса: ", error);
+      console.error("Ошибка отмены: ", error);
     });
   }
 
-  function showResults(votes) {
-    document.getElementById('cards').querySelectorAll('.card').forEach(c => c.classList.add('disabled'));
-    document.getElementById('vote-btn').style.display = 'none';
-    document.getElementById('retract-btn').style.display = 'block';
-    
-    const v0 = votes[0] || 0;
-    const v1 = votes[1] || 0;
-    const total = v0 + v1;
-    
-    const p0 = total ? Math.round(v0 / total * 100) : 0;
-    const p1 = total ? Math.round(v1 / total * 100) : 0;
-    
-    document.getElementById('results').style.display = 'block';
-    setTimeout(() => {
-      document.getElementById('bar-0').style.width = p0 + '%';
-      document.getElementById('bar-1').style.width = p1 + '%';
-      document.getElementById('pct-0').textContent = p0 + '%';
-      document.getElementById('pct-1').textContent = p1 + '%';
-      document.getElementById('total-votes').textContent = total + ' vote' + (total !== 1 ? 's' : '') + ' total';
-    }, 100);
-  }
-
-  // Слушатель изменений в базе данных
+  // Слушатель Firebase просто обновляет цифры в памяти и обновляет экран
   onValue(votesRef, (snapshot) => {
     const data = snapshot.val() || { option0: 0, option1: 0 };
-    const votes = [data.option0 || 0, data.option1 || 0];
-    
-    const myVote = getMyVote();
-    if (myVote !== null) {
-      selected = parseInt(myVote);
-      document.getElementById('card-0').classList.toggle('selected', selected === 0);
-      document.getElementById('card-1').classList.toggle('selected', selected === 1);
-      showResults(votes);
-    } else {
-      if (document.getElementById('results').style.display === 'block') {
-        showResults(votes);
-      }
-    }
+    currentVotes = [data.option0 || 0, data.option1 || 0];
+    renderUI(); 
   });
 </script>
 </body>
